@@ -1,32 +1,24 @@
-### Deep learning project seed
-Use this seed to start new deep learning / ML projects.
-
-- Built in setup.py
-- Built in requirements
-- Examples with MNIST
-- Badges
-- Bibtex
-
-#### Goals  
-The goal of this seed is to structure ML paper-code the same so that work can easily be extended and replicated.   
-
-### DELETE EVERYTHING ABOVE FOR YOUR PROJECT  
- 
----
-
 <div align="center">    
  
-# Your Project Name     
+# Speaker recognition model for iCub   
 
-[![Paper](http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg)](https://www.nature.com/articles/nature14539)
-[![Conference](http://img.shields.io/badge/NeurIPS-2019-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018)
-[![Conference](http://img.shields.io/badge/ICLR-2019-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018)
-[![Conference](http://img.shields.io/badge/AnyConference-year-4b44ce.svg)](https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018)  
-<!--
-ARXIV   
-[![Paper](http://img.shields.io/badge/arxiv-math.co:1480.1111-B31B1B.svg)](https://www.nature.com/articles/nature14539)
--->
-![CI testing](https://github.com/PyTorchLightning/deep-learning-project-template/workflows/CI%20testing/badge.svg?branch=master&event=push)
+[comment]: <> ([![Paper]&#40;http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg&#41;]&#40;https://www.nature.com/articles/nature14539&#41;)
+
+[comment]: <> ([![Conference]&#40;http://img.shields.io/badge/NeurIPS-2019-4b44ce.svg&#41;]&#40;https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018&#41;)
+
+[comment]: <> ([![Conference]&#40;http://img.shields.io/badge/ICLR-2019-4b44ce.svg&#41;]&#40;https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018&#41;)
+
+[comment]: <> ([![Conference]&#40;http://img.shields.io/badge/AnyConference-year-4b44ce.svg&#41;]&#40;https://papers.nips.cc/book/advances-in-neural-information-processing-systems-31-2018&#41;  )
+
+[comment]: <> (<!--)
+
+[comment]: <> (ARXIV   )
+
+[comment]: <> ([![Paper]&#40;http://img.shields.io/badge/arxiv-math.co:1480.1111-B31B1B.svg&#41;]&#40;https://www.nature.com/articles/nature14539&#41;)
+
+[comment]: <> (-->)
+
+[comment]: <> (![CI testing]&#40;https://github.com/PyTorchLightning/deep-learning-project-template/workflows/CI%20testing/badge.svg?branch=master&event=push&#41;)
 
 
 <!--  
@@ -41,10 +33,10 @@ What it does
 First, install dependencies   
 ```bash
 # clone project   
-git clone https://github.com/YourGithubName/deep-learning-project-template
+git clone https://github.com/gonzalezJohnas/SpeakerRecognitionYarp.git
 
 # install project   
-cd deep-learning-project-template 
+cd SpeakerRecognitionYarp 
 pip install -e .   
 pip install -r requirements.txt
  ```   
