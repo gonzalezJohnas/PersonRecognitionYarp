@@ -9,6 +9,8 @@ import torchaudio
 import torch
 import seaborn as sns
 import tqdm
+from speaker_embeddings import SpeakerEmbeddings
+import timeit
 
 PATH_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_vad/train"
 PATH_TEST = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_vad/test"
@@ -139,12 +141,15 @@ def test_negative_accuracy(train_loader):
     nb_matched = 0
 
     for emb_test, label_test in zip(X_test, y_test):
-        score, predicted_label = get_prediction(train_loader, emb_test)
+        score, predicted_label = train_loader.get_speaker(emb_test) #get_prediction(train_loader, emb_test)
         print(score)
         if score < threshold:
             nb_matched += 1
 
     print(f"Negative accuracy {nb_matched/len(X_test)}")
+
+
+
 
 
 def main(train_loader):
@@ -153,12 +158,13 @@ def main(train_loader):
 
     X_test, y_test = get_embeddings(test_loader, encoder)
 
+
     name_dict = test_loader.name_dict
 
     confusion_matrix = np.zeros((len(name_dict), len(name_dict)))
 
     for emb_test, label_test in zip(X_test, y_test):
-        score, predicted_label = get_prediction(train_loader, emb_test)
+        score, predicted_label = train_loader.get_speaker(emb_test)
         print(score)
         if score > threshold:
             confusion_matrix[label_test, predicted_label] += 1
@@ -186,8 +192,12 @@ def main(train_loader):
 if __name__ == "__main__":
     # create_embeddings(PATH_TRAIN, OUTPUT_EMB_TRAIN)
 
-    train_loader = SpeakerDataset(OUTPUT_EMB_TRAIN, extension="*.npy")
-    main(train_loader)
+    test_loader = SpeakerDataset(PATH_TEST)
+    x, label = test_loader[0]
 
-    print("Negative accuracy processing")
-    test_negative_accuracy(train_loader)
+
+    # train_loader = SpeakerEmbeddings(OUTPUT_EMB_TRAIN)
+    # main(train_loader)
+    #
+    # print("Negative accuracy processing")
+    # test_negative_accuracy(train_loader)
