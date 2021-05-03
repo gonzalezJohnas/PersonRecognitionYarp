@@ -1,6 +1,6 @@
 <div align="center">    
  
-# Speaker recognition model for iCub   
+# Multi-modal people recognition model for iCub   
 
 [comment]: <> ([![Paper]&#40;http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg&#41;]&#40;https://www.nature.com/articles/nature14539&#41;)
 
