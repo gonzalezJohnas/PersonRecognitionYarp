@@ -6,7 +6,6 @@ import torch
 OUTPUT_EMB_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_emb/train"
 
 
-
 class SpeakerEmbeddings:
 
     def __init__(self, dataset_dir):
@@ -24,19 +23,13 @@ class SpeakerEmbeddings:
         speaker_labels = os.listdir(self.root_dir)
         for label_id, s in enumerate(speaker_labels):
             emb_filenames = glob.glob(os.path.join(self.root_dir, s, "*.npy"))
-            list_emb = [np.load(emb_f) for emb_f in emb_filenames]
+            list_emb = [np.load(emb_f).squeeze() for emb_f in emb_filenames]
 
-            mean = self._get_mean_embedding(list_emb)
+            mean = np.array(list_emb).mean(axis=0)
             self.mean_embedding[label_id] = mean
             self.data_dict[label_id] = list_emb
             self.name_dict[label_id] = s
 
-    def _get_mean_embedding(self, embeddings):
-        mean_emb = []
-        for emb in embeddings:
-            mean_emb.append(emb.mean(axis=0))
-
-        return np.array(mean_emb).mean(axis=0)
 
     def get_speaker(self, emb):
         min_score = 0
@@ -54,6 +47,9 @@ class SpeakerEmbeddings:
                 min_score = score[0]
 
         return min_score, final_label
+
+    def get_name_speaker(self, speaker_id):
+        return self.name_dict[speaker_id]
 
 
 if __name__ == '__main__':

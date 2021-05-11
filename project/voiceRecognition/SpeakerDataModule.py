@@ -4,8 +4,9 @@ import pandas as pd
 import pytorch_lightning as pl
 import torchaudio, torch
 import numpy as np
-from project.utils import save_audio, split_audio_chunks, process_dataset
+from project.voiceRecognition.utils import save_audio, split_audio_chunks, process_dataset
 import torchaudio.transforms as T
+
 
 class SpeakerDataset(Dataset):
     """Speaker raw audio dataset."""
@@ -54,6 +55,7 @@ class SpeakerDataset(Dataset):
 
 
         return sample["mfcc"], sample["label"].squeeze()
+
 
 
     def _create_speaker_dataframe(self):

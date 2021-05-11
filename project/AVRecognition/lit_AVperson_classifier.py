@@ -4,7 +4,7 @@ import torch
 import pytorch_lightning as pl
 from torch.nn import functional as F
 from torch.nn import Sequential, Conv2d, BatchNorm2d, ReLU, MaxPool2d, Softmax, AvgPool2d
-from project.voiceRecognition.SpeakerDataModule import SpeakerDataset, SpeakerDataModule
+from project.AVRecognition.PersonDataModule import PersonDataModule
 import torchvision.models as models
 from collections import OrderedDict
 
@@ -12,66 +12,21 @@ from collections import OrderedDict
 class Backbone(torch.nn.Module):
     def __init__(self, nb_class=13):
         super().__init__()
-        self.conv1 = Conv2d(1, 96, kernel_size=(3, 3))
-        self.conv2 = Conv2d(96, 128, kernel_size=(3, 3))
-        self.conv3 = Conv2d(128, 256, kernel_size=(3, 3))
-        self.conv4 = Conv2d(256, 512, kernel_size=(3, 3))
         self.relu = ReLU()
-        self.avg_pool = AvgPool2d(kernel_size=2)
-
-        self.dropout = torch.nn.Dropout(0.4)
-        self.l1 = torch.nn.Linear(43008, 512)
-        self.l2 = torch.nn.Linear(512, 64)
+        self.dropout = torch.nn.Dropout()
+        self.l1 = torch.nn.Linear(704, 256)
+        self.l2 = torch.nn.Linear(256, 64)
         self.l3 = torch.nn.Linear(64, 32)
+
         self.output = torch.nn.Linear(32, nb_class)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.avg_pool(x)
-        x = self.conv2(x)
-        x = self.relu(x)
-        x = self.avg_pool(x)
-        x = self.conv3(x)
-        x = self.relu(x)
-        x = self.avg_pool(x)
-        x = self.conv4(x)
-        x = self.relu(x)
-        x = self.avg_pool(x)
-        x = self.dropout(x)
-
-        x = x.view(x.size(0), -1)
-        # print(f"\n {x.size()}")
         x = self.l1(x)
-        x = self.dropout(x)
+        x = self.relu(x)
         x = self.l2(x)
+        x = self.relu(x)
         x = self.l3(x)
-        x = self.dropout(x)
-        x = self.output(x)
-        return x
-
-
-class Resnet(torch.nn.Module):
-    def __init__(self, nb_class=13):
-        super().__init__()
-        self.encoder = models.resnet18(pretrained=False)
-
-        self.projection_head = torch.nn.Sequential(OrderedDict([
-            ('fc1', torch.nn.Linear(512, 128)),
-            ('activation', torch.nn.ReLU()),
-            ('fc2', torch.nn.Linear(128, 64))
-        ]))
-        self.dropout = torch.nn.Dropout(0.6)
-
-        # To deal with MELSPECT which have only one channel
-        self.encoder.conv1 = torch.nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        self.encoder.fc = self.projection_head
-        self.RELU = torch.nn.ReLU()
-        self.output = torch.nn.Linear(64, nb_class)
-
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.RELU(x)
+        x = self.relu(x)
         x = self.dropout(x)
         x = self.output(x)
         return x
@@ -149,7 +104,7 @@ def cli_main():
     # args
     # ------------
     parser = ArgumentParser()
-    parser.add_argument('--batch_size', default=10, type=int)
+    parser.add_argument('--batch_size', default=128, type=int)
     parser = pl.Trainer.add_argparse_args(parser)
     parser = LitSpeakerClassifier.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -158,25 +113,11 @@ def cli_main():
     # data
     # ------------
     parameters = {
-        "data_dir": "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/voice/dataset_vad_v2",
-        "length_chunk": 2000,
-        "overlap": 150,
+        "data_dir": "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/audio_visual/",
         "batch_size": args.batch_size,
-        "feat": "raw",
-        "output_dir": "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_vad_v2",
-        "melargs": {
-            "sample_rate": 16000,
-            "n_fft": 512,
-            "win_length": 512,
-            "hop_length": 512 // 4,
-            "power": 2.0,
-            "norm": 'slaney',
-            "n_mels": 256,
-            "normalized": True,
-        }
     }
 
-    dm = SpeakerDataModule(**parameters)
+    dm = PersonDataModule(**parameters)
     dm.setup()
 
     print(f"Number of class {dm.num_classe}")
@@ -201,6 +142,8 @@ def cli_main():
     # ------------
     result = trainer.test(test_dataloaders=test_loader)
     print(result)
+
+    torch.save(model, "model_audiovisual.pt")
 
 
 if __name__ == '__main__':
