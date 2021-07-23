@@ -87,6 +87,7 @@ class PersonsRecognition(yarp.RFModule):
         # Model for cross-modale recognition
         self.model_av = None
         self.sm = torch.nn.Softmax(dim=1)
+        self.threshold_multimodal = None
 
         self.device = None
 
@@ -100,7 +101,7 @@ class PersonsRecognition(yarp.RFModule):
         # Define vars to receive audio
         self.audio_in_port = yarp.BufferedPortSound()
 
-        self.label_outputPort = yarp.Port()
+        self.label_outputPort = yarp.BufferedPortBottle()
         self.audio_power_port = yarp.Port()
 
         # Module parameters
@@ -113,8 +114,8 @@ class PersonsRecognition(yarp.RFModule):
                                    "Root path of the embeddings database (voice & face) (string)").asString()
 
         self.length_input = rf.check("length_input",
-                                     yarp.Value(2),
-                                     "length input in seconds (int)").asInt()
+                                     yarp.Value(1),
+                                     "length audio input in seconds (int)").asInt()
 
         self.threshold_audio = rf.check("threshold_audio",
                                   yarp.Value(0.42),
@@ -125,7 +126,7 @@ class PersonsRecognition(yarp.RFModule):
                                         "threshold_audio for detection (double)").asDouble()
 
         self.threshold_power = rf.check("threshold_vad",
-                                        yarp.Value(2.),
+                                        yarp.Value(1.5),
                                         "threshold for VAD detection (double)").asDouble()
 
         self.sampling_rate = rf.check("fs",
@@ -179,6 +180,8 @@ class PersonsRecognition(yarp.RFModule):
         self.model_av = torch.load(
             "/home/icub/PycharmProjects/SpeakerRecognitionYarp/project/AVRecognition/model_audiovisual.pt")
         self.model_av.eval()
+        self.threshold_multimodal = 0.8
+
         info("Initialization complete")
 
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -294,17 +297,13 @@ class PersonsRecognition(yarp.RFModule):
         return max_power
 
     def get_face_coordinate(self):
-        # if self.face_coord_port.getInputCount():
-        #     self.coord_face = self.face_coord_port.read(False)
-        #     return True
-        #
-        # self.coord_face = None
-        # return False
+        if self.face_coord_port.getInputCount():
+            self.coord_face = self.face_coord_port.read(False)
+            return self.coord_face is not None
 
-        rects = self.detector(self.frame)
-        self.coord_face = [[r.top(), r.left(), r.bottom(), r.right()] for r in rects]
+        self.coord_face = None
+        return False
 
-        return True
 
     def updateModule(self):
         if self.process:
@@ -319,22 +318,34 @@ class PersonsRecognition(yarp.RFModule):
                     self.nb_samples_received = 0
 
             if self.read_image() and self.get_face_coordinate():
-                # self.coord_face = format_face_coord(self.coord_face)
-                face_images = [face_alignement(f, self.frame) for f in self.coord_face]
-                self.face_emb = self.get_face_embeddings(face_images)
+                try:
+                    self.coord_face = format_face_coord(self.coord_face)
+                    face_images = [face_alignement(f, self.frame) for f in self.coord_face]
+                    self.face_emb = self.get_face_embeddings(face_images)
+                except Exception:
+                    info("Exception while computing face embeddings")
 
             if len(self.speaker_emb) and len(self.face_emb):
-                person_name = self.predict_multimodal(self.speaker_emb, self.face_emb)
-                print(f"Recognized person with AV model {person_name}")
-                self.speaker_emb = []
+                person_name, score = self.predict_multimodal(self.speaker_emb, self.face_emb)
+                if score > self.threshold_multimodal:
+                    print(f"Recognized person with AV model {person_name}")
+                    self.speaker_emb = []
+                    self.face_emb = []
+                    self.write_label(person_name, score, 2)
+                    self.process = False
 
             elif len(self.speaker_emb):
-                speaker_name = self.predict_speaker(self.speaker_emb)
+                speaker_name, score = self.predict_speaker(self.speaker_emb)
                 print(f"Recognized speaker {speaker_name}")
                 self.speaker_emb = []
+                self.write_label(speaker_name, score, 1)
+
             elif len(self.face_emb):
-                faces_name = self.predict_face(self.face_emb)
+                faces_name, scores = self.predict_face(self.face_emb)
+                self.face_emb = []
                 print(f"Recognized faces {faces_name}")
+                # for name, score in zip(faces_name, scores):
+                #     self.write_label(name, score, 0)
             else:
                 pass
 
@@ -362,7 +373,6 @@ class PersonsRecognition(yarp.RFModule):
         face_embeddings = []
         with torch.no_grad():
             for np_img in images:
-
                 cv.cvtColor(np_img, cv.COLOR_RGB2BGR, np_img)
                 input_img = self.trans(np_img)
                 input_img = input_img.unsqueeze_(0)
@@ -382,10 +392,11 @@ class PersonsRecognition(yarp.RFModule):
         else:
             speaker_name = "Unknown"
 
-        return speaker_name
+        return speaker_name, float(score)
 
     def predict_face(self, embeddings):
         predicted_faces = []
+        score_faces = []
         for emb in embeddings:
             score, face_id = self.db_embeddings_face.get_speaker(emb)
             # print(f"Cosine distance for face embeddings {score}")
@@ -394,21 +405,35 @@ class PersonsRecognition(yarp.RFModule):
             else:
                 face_name = "Unknown"
             predicted_faces.append(face_name)
+            score_faces.append(float(score))
 
-        return predicted_faces
+        return predicted_faces, score_faces
 
     def predict_multimodal(self, audio_emb, face_emb):
         if audio_emb.shape[0] > 1:
             audio_emb = audio_emb[0]
 
         input_emb = np.hstack((audio_emb, face_emb[0]))
-        input_emb = torch.from_numpy(input_emb).cuda()
-        outputs = self.sm(self.model_av(input_emb))
-        prediction_id = int(torch.argmax(outputs.cpu()).numpy())
-        recognized_name = self.db_embeddings_face.get_name_speaker(prediction_id)
+        with torch.no_grad():
+            input_emb = torch.from_numpy(input_emb).cuda()
+            outputs = self.sm(self.model_av(input_emb))
 
+            proba, p_id = torch.max(outputs, 1)
+            prediction_id = int(p_id.cpu().numpy()[0])
+            score = float(proba.cpu().numpy()[0])
+            recognized_name = self.db_embeddings_face.get_name_speaker(prediction_id)
 
-        return recognized_name
+        return recognized_name, score
+
+    def write_label(self, name_speaker, score, mode):
+        if self.label_outputPort.getOutputCount():
+            name_bottle = self.label_outputPort.prepare()
+            name_bottle.clear()
+            name_bottle.addString(name_speaker)
+            name_bottle.addFloat32(score)
+            name_bottle.addInt(mode)
+
+            self.label_outputPort.write()
 
 
 if __name__ == '__main__':

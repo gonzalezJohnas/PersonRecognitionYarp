@@ -15,7 +15,7 @@ import seaborn as sn
 import pandas as pd
 import matplotlib.pyplot as plt
 
-threshold = 0.42
+threshold = 0.1
 
 
 def max_Score(score_1, score_2, label_1, label_2):
@@ -71,20 +71,33 @@ def cli_main():
         confusion_matrix_baseline_n = confusion_matrix_baseline.astype('float') / confusion_matrix_baseline.sum(axis=1)[:, np.newaxis]
 
         df_cm_baseline = pd.DataFrame(confusion_matrix_baseline_n, index=class_names, columns=class_names)
-        plt.figure(figsize=(18, 15))
-        sn.set(font_scale=1.4)  # for label size
-        sn.heatmap(df_cm_baseline, annot=True, annot_kws={"size": 16})  # font size
+        plt.figure(figsize=(15, 10))
+        heatmap = sn.heatmap(df_cm_baseline, annot=True, annot_kws={"size": 10}, fmt='.2f',
+                              cbar_kws={'format': '%.0f%%', 'ticks': [0, 100]})
 
+        heatmap.yaxis.set_ticklabels(heatmap.yaxis.get_ticklabels(), rotation=0, ha='right', fontsize=15)
+        heatmap.xaxis.set_ticklabels(heatmap.xaxis.get_ticklabels(), rotation=45, ha='right', fontsize=15)
+        plt.ylabel('True label', fontsize=15)
+        plt.xlabel('Predicted label', fontsize=15)
+        plt.title("Confusion matrix  Triplet-Loss, Positive accuracy {}%".format(round(total_accuracy_baseline, 2)), fontsize=20)
         plt.savefig("confusion_matrix_baseline.png")
-        print(f"Baseline Total accuracy {total_accuracy_baseline}%")
-        plt.figure(figsize=(18, 15))
+
+
 
         total_accuracy_model = confusion_matrix_model.diagonal().sum() / len(test_loader)
         confusion_matrix_model_n = confusion_matrix_model.astype('float') / confusion_matrix_model.sum(axis=1)[:, np.newaxis]
 
+        plt.figure(figsize=(15, 10))
         df_cm_model = pd.DataFrame(confusion_matrix_model_n, index=class_names, columns=class_names)
-        sn.set(font_scale=1.4)  # for label size
-        sn.heatmap(df_cm_model, annot=True, annot_kws={"size": 16})  # font size
+
+        heatmap = sn.heatmap(df_cm_model, annot=True, annot_kws={"size": 10}, fmt='.2f',
+                              cbar_kws={'format': '%.0f%%', 'ticks': [0, 100]})
+
+        heatmap.yaxis.set_ticklabels(heatmap.yaxis.get_ticklabels(), rotation=0, ha='right', fontsize=15)
+        heatmap.xaxis.set_ticklabels(heatmap.xaxis.get_ticklabels(), rotation=45, ha='right', fontsize=15)
+        plt.ylabel('True label', fontsize=15)
+        plt.xlabel('Predicted label', fontsize=15)
+        plt.title("Confusion matrix  Triplet-Loss, Positive accuracy {}%".format(round(total_accuracy_model, 2)), fontsize=20)
         plt.savefig("confusion_matrix_model.png")
 
         print(f"Model Total accuracy {total_accuracy_model}%")

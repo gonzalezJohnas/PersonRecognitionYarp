@@ -22,6 +22,7 @@ class SpeakerEmbeddings:
 
         speaker_labels = os.listdir(self.root_dir)
         for label_id, s in enumerate(speaker_labels):
+
             emb_filenames = glob.glob(os.path.join(self.root_dir, s, "*.npy"))
             list_emb = [np.load(emb_f).squeeze() for emb_f in emb_filenames]
 
@@ -30,21 +31,24 @@ class SpeakerEmbeddings:
             self.data_dict[label_id] = list_emb
             self.name_dict[label_id] = s
 
-
     def get_speaker(self, emb):
+
         min_score = 0
         final_label = 0
         for speaker_label, mean_emb in self.mean_embedding.items():
             score = self.similarity_func(torch.from_numpy(mean_emb), emb)
-            if score[0] > min_score:
-                min_score = score[0]
+            score = score.mean()
+            if score > min_score:
+                min_score = score
                 final_label = speaker_label
 
         min_score = 0
         for embeddings in self.data_dict[final_label]:
             score = self.similarity_func(torch.from_numpy(embeddings), emb)
-            if score[0] > min_score:
-                min_score = score[0]
+            score = score.mean()
+
+            if score > min_score:
+                min_score = score
 
         return min_score, final_label
 

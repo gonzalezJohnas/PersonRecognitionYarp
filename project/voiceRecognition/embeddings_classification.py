@@ -10,13 +10,13 @@ import torch
 import seaborn as sns
 import tqdm
 from speaker_embeddings import SpeakerEmbeddings
-import timeit
+import time
 
-PATH_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_vad/train"
-PATH_TEST = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_vad/test"
-PATH_TEST_UNKNOWN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/raw/test_unknown"
+PATH_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/voice/dataset_emb_vad_2/train"
+PATH_TEST = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/voice/dataset_vad/test"
+PATH_TEST_UNKNOWN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/voice/raw/test_unknown"
 
-OUTPUT_EMB_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_emb/train"
+OUTPUT_EMB_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/voice/dataset_emb/"
 encoder = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
 
 threshold = 0.42
@@ -72,6 +72,7 @@ class SpeakerDataset(Dataset):
         name_dict = {}
         speaker_labels = os.listdir(self.root_dir)
         for label_id, s in enumerate(speaker_labels):
+
             audios_filenames = glob.glob(os.path.join(self.root_dir, s, self.file_extension))
             data_dict[label_id] = audios_filenames
             name_dict[label_id] = s
@@ -116,21 +117,9 @@ def get_embeddings(dataset, encoder):
         X.append(emb)
         y.append(label)
 
+        if len(X)==2:
+            break
     return X, y
-
-
-def get_prediction(dataset_Train, input):
-    similarity_func = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
-    min_score = 0
-    final_label = ""
-    for emb, label in dataset_Train:
-        score = similarity_func(input, emb)
-
-        if score[0] > min_score:
-            min_score = score[0]
-            final_label = label
-
-    return min_score, final_label
 
 
 def test_negative_accuracy(train_loader):
@@ -141,7 +130,7 @@ def test_negative_accuracy(train_loader):
     nb_matched = 0
 
     for emb_test, label_test in zip(X_test, y_test):
-        score, predicted_label = train_loader.get_speaker(emb_test) #get_prediction(train_loader, emb_test)
+        score, predicted_label = train_loader.get_speaker(emb_test)
         print(score)
         if score < threshold:
             nb_matched += 1
@@ -162,10 +151,10 @@ def main(train_loader):
     name_dict = test_loader.name_dict
 
     confusion_matrix = np.zeros((len(name_dict), len(name_dict)))
-
     for emb_test, label_test in zip(X_test, y_test):
         score, predicted_label = train_loader.get_speaker(emb_test)
-        print(score)
+        score = score.mean()
+
         if score > threshold:
             confusion_matrix[label_test, predicted_label] += 1
 
@@ -176,28 +165,33 @@ def main(train_loader):
     # class_accuracy = 100 * confusion_matrix.diagonal() /
     total_accuracy = confusion_matrix.diagonal().sum() / len(test_loader)
     print(f"Total accuracy {total_accuracy}%")
-
+    confusion_matrix_n = confusion_matrix.astype('float') / confusion_matrix.sum(axis=1)[:,
+                                                                              np.newaxis]
     class_names = [name_dict[i] for i in range(0, len(name_dict))]
-    df_cm = pd.DataFrame(confusion_matrix, index=class_names, columns=class_names).astype(int)
-    heatmap = sns.heatmap(df_cm, annot=True, fmt="d")
+    df_cm = pd.DataFrame(confusion_matrix_n, index=class_names, columns=class_names)
+    heatmap = sns.heatmap(df_cm, annot=True, annot_kws={"size": 10}, fmt='.2f',  cbar_kws={'format': '%.0f%%', 'ticks': [0, 100]})
 
     heatmap.yaxis.set_ticklabels(heatmap.yaxis.get_ticklabels(), rotation=0, ha='right', fontsize=15)
     heatmap.xaxis.set_ticklabels(heatmap.xaxis.get_ticklabels(), rotation=45, ha='right', fontsize=15)
     plt.ylabel('True label', fontsize=15)
     plt.xlabel('Predicted label', fontsize=15)
-    plt.title("Confusion matrix  Triplet-Loss, Positive accuracy {}%".format(total_accuracy), fontsize=20 )
+    plt.title("Confusion matrix  Triplet-Loss, Positive accuracy {}%".format(round(total_accuracy, 2)), fontsize=20 )
     plt.savefig("confusion_matrix_embeddings.png")
 
 
 if __name__ == "__main__":
-    # create_embeddings(PATH_TRAIN, OUTPUT_EMB_TRAIN)
+    # create_embeddings(PATH_TEST, "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/audio_visual/test")
 
     test_loader = SpeakerDataset(PATH_TEST)
+
     x, label = test_loader[0]
 
+    t = time.process_time()
 
-    # train_loader = SpeakerEmbeddings(OUTPUT_EMB_TRAIN)
-    # main(train_loader)
-    #
-    # print("Negative accuracy processing")
-    # test_negative_accuracy(train_loader)
+    train_loader = SpeakerEmbeddings(OUTPUT_EMB_TRAIN)
+    end = time.time()
+    print(f"Elapsed time {time.process_time() - t}")
+
+    main(train_loader)
+    print("Negative accuracy processing")
+    test_negative_accuracy(train_loader)

@@ -143,7 +143,7 @@ def cli_main():
     result = trainer.test(test_dataloaders=test_loader)
     print(result)
 
-    torch.save(model, "model_audiovisual.pt")
+    # torch.save(model, "model_audiovisual.pt")
 
 
 if __name__ == '__main__':

@@ -16,9 +16,9 @@ from tqdm import tqdm
 torch.manual_seed(17)
 
 # TRAIN PARAMETERS
-data_dir = './Database_v2'
-batch_size = 64
-epochs = 20
+data_dir = '/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/face/train'
+batch_size = 16
+epochs = 5
 LR = 1e-4
 workers = 0 if os.name == 'nt' else 8
 
@@ -68,10 +68,10 @@ def main():
         dropout_prob=0.5
     ).to(device)
 
-    # Freeze al layers except the last linear layer for re-training
-    for param in model.parameters():
-        param.requires_grad = False
-    model.last_linear.requires_grad_(True)
+    # # Freeze al layers except the last linear layer for re-training
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # model.last_linear.requires_grad_(True)
 
 
     optim = torch.optim.Adam(model.parameters(), lr=LR)
