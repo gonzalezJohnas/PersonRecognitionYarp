@@ -115,17 +115,18 @@ class FacesEmbeddings:
 
         min_score = 0
         final_label = 0
-        for speaker_label, mean_emb in self.mean_embedding.items():
-            score = self.similarity_func(torch.from_numpy(mean_emb), emb).numpy()
-            if score > min_score:
-                min_score = score
-                final_label = speaker_label
+        for speaker_label, list_emb in self.data_dict.items():
+            for emb in list_emb:
+                score = self.similarity_func(torch.from_numpy(mean_emb), emb).numpy()
+                if score > min_score:
+                    min_score = score
+                    final_label = speaker_label
 
-        min_score = 0
-        for embeddings in self.data_dict[final_label]:
-            score = self.similarity_func(torch.from_numpy(embeddings), emb).numpy()
-            if score > min_score:
-                min_score = score
+        # min_score = 0
+        # for embeddings in self.data_dict[final_label]:
+        #     score = self.similarity_func(torch.from_numpy(embeddings), emb).numpy()
+        #     if score > min_score:
+        #         min_score = score
 
         return min_score, final_label
 

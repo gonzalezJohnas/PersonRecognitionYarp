@@ -131,18 +131,6 @@ def cli_main():
 
     model = LitSpeakerClassifier(Backbone(nb_class=dm.num_classe), args.learning_rate)
 
-    # ------------
-    # training
-    # ------------
-    trainer = pl.Trainer.from_argparse_args(args)
-    trainer.fit(model, train_loader, val_loader)
-
-    # ------------
-    # testing
-    # ------------
-    result = trainer.test(test_dataloaders=test_loader)
-    print(result)
-
     # torch.save(model, "model_audiovisual.pt")
 
 

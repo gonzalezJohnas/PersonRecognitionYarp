@@ -1,4 +1,5 @@
 import yarp
+from PIL import Image
 
 def format_face_coord(bottle_face_coord):
     """
@@ -11,6 +12,7 @@ def format_face_coord(bottle_face_coord):
     for i in range(bottle_face_coord.size()):
         face_data = bottle_face_coord.get(i).asList()
 
+        id = face_data.get(1).asString()
         face_coordinates = face_data.get(2).asList()
 
         list_face_coord.append([face_coordinates.get(0).asDouble(), face_coordinates.get(1).asDouble(),
@@ -18,6 +20,26 @@ def format_face_coord(bottle_face_coord):
 
     return list_face_coord
 
+
+
+
+def get_center_face(faces, width):
+    """
+    From a list of faces identify the most centered one according to the image width
+    :param faces:
+    :param width:
+    :return: most centered face coordinate
+    """
+    min_x = 1e5
+    min_index = -1
+
+    for i, face_coord in enumerate(faces):
+        center_face_x = face_coord[0] + ((face_coord[2] - face_coord[0]) / 2)
+        if abs((width / 2)-center_face_x) < min_x:
+            min_index = i
+            min_x = abs((width / 2)-center_face_x)
+
+    return [faces[min_index]]
 
 def face_alignement(face_coord, frame, margin=25):
     """
@@ -83,3 +105,9 @@ def format_names_to_bottle(list_names):
 def fixed_image_standardization(image_tensor):
     processed_tensor = (image_tensor - 127.5) / 128.0
     return processed_tensor
+
+def get_tensor_from_image( img_path, trans):
+        frame = Image.open(img_path)
+        tensor = trans(frame).unsqueeze(0).cuda(0)
+
+        return tensor
