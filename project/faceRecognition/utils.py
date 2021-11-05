@@ -1,24 +1,25 @@
-import yarp
 from PIL import Image
 
 def format_face_coord(bottle_face_coord):
+    import yarp
     """
     Process the face coordinates read by the yarp bottle
     :param bottle_face_coord: coordinates of detected face (yarp bottle)
     :return: list of boxes with box defined as  [top, left, bottom, right]
     """
     list_face_coord = []
+    list_face_id = []
 
     for i in range(bottle_face_coord.size()):
         face_data = bottle_face_coord.get(i).asList()
 
-        id = face_data.get(1).asString()
-        face_coordinates = face_data.get(2).asList()
+        list_face_id.append(face_data.get(0).asString())
+        face_coordinates = face_data.get(1).asList()
 
         list_face_coord.append([face_coordinates.get(0).asDouble(), face_coordinates.get(1).asDouble(),
                       face_coordinates.get(2).asDouble(), face_coordinates.get(3).asDouble()])
 
-    return list_face_coord
+    return list_face_id, list_face_coord
 
 
 
@@ -41,7 +42,7 @@ def get_center_face(faces, width):
 
     return [faces[min_index]]
 
-def face_alignement(face_coord, frame, margin=25):
+def face_alignement(face_coord, frame, margin=15):
     """
     Preprocess tha face with standard face alignment preprocessing
     :param coord_faces: list of faces' coordinates
@@ -54,18 +55,18 @@ def face_alignement(face_coord, frame, margin=25):
     xmax = int(face_coord[2])
     ymax = int(face_coord[3])
 
-    heigth_face = (ymax - ymin)
-    width_face = (xmax - xmin)
+    # heigth_face = (ymax - ymin)
+    # width_face = (xmax - xmin)
+    #
+    # center_face = [ymin + (heigth_face / 2), xmin + (width_face / 2)]
+    #
+    # new_ymin = int(center_face[0] - margin)
+    # new_xmin = int(center_face[1] - margin)
+    #
+    # new_ymax = int(center_face[0] + margin)
+    # new_xmax = int(center_face[1] + margin)
 
-    center_face = [ymin + (heigth_face / 2), xmin + (width_face / 2)]
-
-    new_ymin = int(center_face[0] - margin)
-    new_xmin = int(center_face[1] - margin)
-
-    new_ymax = int(center_face[0] + margin)
-    new_xmax = int(center_face[1] + margin)
-
-    face = get_ROI(new_xmin, new_ymin, new_xmax, new_ymax, frame)
+    face = get_ROI(xmin, ymin, xmax, ymax, frame)
     return face
 
 
@@ -89,6 +90,7 @@ def check_border_limit(coord, border_limit):
 
 
 def format_names_to_bottle(list_names):
+    import yarp
 
     list_objects_bottle = yarp.Bottle()
     list_objects_bottle.clear()

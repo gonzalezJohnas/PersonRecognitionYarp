@@ -116,8 +116,8 @@ class FacesEmbeddings:
         min_score = 0
         final_label = 0
         for speaker_label, list_emb in self.data_dict.items():
-            for emb in list_emb:
-                score = self.similarity_func(torch.from_numpy(mean_emb), emb).numpy()
+            for embt in list_emb:
+                score = self.similarity_func(torch.from_numpy(embt), emb).numpy()
                 if score > min_score:
                     min_score = score
                     final_label = speaker_label
@@ -198,7 +198,6 @@ def create_embeddings(data_dir, output_dir):
         for ext in ('*.png', '*.jpg'):
             list_img_filenames.extend( glob.glob(os.path.join(data_dir, people_dir, ext)))
 
-
         for i, img_path in enumerate(list_img_filenames):
             input_tensor = get_tensor_from_image(img_path, trans)
             embeddings = encoder(input_tensor).data.cpu().numpy()
@@ -246,8 +245,8 @@ def main(train_loader):
 
 
 if __name__ == "__main__":
-    # create_embeddings(PATH_TEST, PATH_TEST)
-    # create_embeddings(PATH_TRAIN, PATH_TRAIN)
+    create_embeddings(PATH_TEST, PATH_TEST)
+    create_embeddings(PATH_TRAIN, PATH_TRAIN)
 
     t = time.process_time()
 

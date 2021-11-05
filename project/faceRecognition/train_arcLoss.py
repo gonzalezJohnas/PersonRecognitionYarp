@@ -28,7 +28,7 @@ torch.manual_seed(1234)
 data_dir = '/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/face'
 model_path = '/home/icub/PycharmProjects/SpeakerRecognitionYarp/project/faceRecognition/saved_model' \
              '/model_triple_facerecogntion_144v2.pt'
-LR = 1e-6
+LR = 1e-3
 workers = 0 if os.name == 'nt' else 8
 margin_p = 0.3
 # Set other training parameters
@@ -72,34 +72,25 @@ def main():
         pretrained="vggface2",
         dropout_prob=0.5
     ).to(device)
-    # model = torch.load(model_path).to(device)
-
 
     # for param in list(model.parameters())[:-8]:
     #     param.requires_grad = False
 
 
 
-    trunk_optimizer = torch.optim.RMSprop(model.parameters(), lr=LR)
+    trunk_optimizer = torch.optim.SGD(model.parameters(), lr=LR)
 
     # Set the loss function
-    loss = losses.TripletMarginLoss(margin=margin_p)
+    loss = losses.ArcFaceLoss(len(train_dataset.classes), 512)
 
-    # Set the mining function
-    # miner = miners.BatchEasyHardMiner(
-    #     pos_strategy=miners.BatchEasyHardMiner.EASY,
-    #     neg_strategy=miners.BatchEasyHardMiner.SEMIHARD)
-
-    miner = miners.BatchHardMiner()
-    # Set the dataloader sampler
-    sampler = samplers.MPerClassSampler(train_dataset.targets, m=4, length_before_new_iter=len(train_dataset))
 
 
     # Package the above stuff into dictionaries.
     models = {"trunk": model}
     optimizers = {"trunk_optimizer": trunk_optimizer}
     loss_funcs = {"metric_loss": loss}
-    mining_funcs = {"tuple_miner": miner}
+    mining_funcs = {}
+    lr_scheduler = {"trunk_scheduler_by_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau(trunk_optimizer)}
 
 
     # Create the tester
@@ -125,7 +116,7 @@ def main():
                                                 accuracy_calculator=AccuracyCalculator(include=['mean_average_precision_at_r'], k="max_bin_count"))
 
 
-    end_of_epoch_hook = hooks.end_of_epoch_hook(tester, dataset_dict, model_folder, patience=15, splits_to_eval=[('val',['train'])])
+    end_of_epoch_hook = hooks.end_of_epoch_hook(tester, dataset_dict, model_folder, splits_to_eval=[('val',['train'])])
 
     # Create the trainer
     trainer = trainers.MetricLossOnly(models,
@@ -134,7 +125,7 @@ def main():
                                       loss_funcs,
                                       mining_funcs,
                                       train_dataset,
-                                      sampler=sampler,
+                                      lr_schedulers=lr_scheduler,
                                       dataloader_num_workers=8,
                                       end_of_iteration_hook=hooks.end_of_iteration_hook,
                                       end_of_epoch_hook=end_of_epoch_hook)
