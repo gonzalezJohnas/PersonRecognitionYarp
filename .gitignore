@@ -37,7 +37,6 @@ test_tube_data/
 datasets/
 model_weights/
 tests/save_dir  
-tests/tests_tt_dir/
 processed/
 raw/
 
@@ -131,3 +130,13 @@ MNIST
 # Data
 data
 **/*.png
+=======
+build
+src/__pycache__/
+
+project/yarpModules/
+
+/project/faceRecognition/logs/
+/project/faceRecognition/saved_model/
+/project/faceRecognition/tensorboard/
+/project/faceRecognition/training_saved_models/
