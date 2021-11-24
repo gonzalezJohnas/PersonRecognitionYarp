@@ -26,10 +26,10 @@ def info(msg):
 class PersonsRecognition(yarp.RFModule):
     """
     Description:
-        Class to recognize speaker from the audio
+        Class to recognize a person from the audio or the face
 
     Args:
-        input_port  : Audio from remoteInterface
+        input_port  : Audio from remoteInterface, raw image from iCub cameras
 
     """
 
@@ -39,10 +39,12 @@ class PersonsRecognition(yarp.RFModule):
         # handle port for the RFModule
         self.module_name = None
         self.handle_port = None
+        self.process = False
 
         # Define vars to receive audio
         self.audio_in_port = None
-        self.audio_power_port = None
+        self.eventPort = None
+        self.is_voice = False
 
         # Predictions parameters
         self.label_outputPort = None
@@ -50,12 +52,10 @@ class PersonsRecognition(yarp.RFModule):
         self.database = None
 
         # Speaker module parameters
-        self.model_audio = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
+        self.model_audio = None
         self.dataset_path = None
         self.db_embeddings_audio = None
-        self.process = False
         self.threshold_audio = None
-        self.threshold_power = None
         self.length_input = None
         self.resample_trans = None
         self.speaker_emb = []
@@ -70,6 +70,8 @@ class PersonsRecognition(yarp.RFModule):
         # Define  port to receive an Image
         self.image_in_port = yarp.BufferedPortImageRgb()
         self.face_coord_port = yarp.BufferedPortBottle()
+
+        # Port to query and update the memory (OPC)
         self.opc_port = yarp.RpcClient()
 
         # Image parameters
@@ -87,6 +89,8 @@ class PersonsRecognition(yarp.RFModule):
         self.trans = None
         self.faces_img = []
         self.face_coord_request = None
+        self.face_model_path = None
+
         # Model for cross-modale recognition
         self.model_av = None
         self.sm = torch.nn.Softmax(dim=1)
@@ -96,20 +100,24 @@ class PersonsRecognition(yarp.RFModule):
 
     def configure(self, rf):
 
+        success = False
+
         # handle port for the RFModule
         self.handle_port = yarp.Port()
         self.attach(self.handle_port)
+        self.handle_port.open('/' + self.module_name)
 
         # Define vars to receive audio
         self.audio_in_port = yarp.BufferedPortSound()
         self.label_outputPort = yarp.Port()
-        self.audio_power_port = yarp.BufferedPortBottle()
+        self.eventPort = yarp.BufferedPortBottle()
 
 
         # Module parameters
         self.module_name = rf.check("name",
                                     yarp.Value("PersonRecognition"),
                                     "module name (string)").asString()
+
         self.dataset_path = rf.check("dataset_path",
                                      yarp.Value(
                                          ""),
@@ -129,32 +137,30 @@ class PersonsRecognition(yarp.RFModule):
                                        yarp.Value(0.55),
                                        "threshold_face for detection (double)").asDouble()
 
-        self.threshold_power = rf.check("threshold_vad",
-                                        yarp.Value(18.5),
-                                        "threshold for VAD detection (double)").asDouble()
+        self.face_model_path =  rf.check("face_model_path",
+                                       yarp.Value(""),
+                                       "Path of the model for face embeddings (string)").asDouble()
+
+        # Set the device for inference for the models
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        print('Running on device: {}'.format(self.device))
+
+        success &= self.load_model_face()
 
         self.sampling_rate = rf.check("fs",
                                       yarp.Value(48000),
                                       " Sampling rate of the incoming audio signal (int)").asInt()
 
-        self.resample_trans = torchaudio.transforms.Resample(self.sampling_rate, 16000)
+        success &= self.load_model_audio()
 
-        # Create handle port to read message
-        self.handle_port.open('/' + self.module_name)
-
-        # Load Database  for audio embeddings
-        try:
-            self.db_embeddings_audio = SpeakerEmbeddings(os.path.join(self.dataset_path, "audio"))
-        except FileNotFoundError:
-            info(f"Unable to find dataset {SpeakerEmbeddings(os.path.join(self.dataset_path, 'audio'))}")
-
-        # Audio and power
+        # Audio and voice events
         self.audio_in_port.open('/' + self.module_name + '/audio:i')
-        self.audio_power_port.open('/' + self.module_name + '/power:i')
+        self.eventPort.open('/' + self.module_name + '/events:i')
+
         # Label
         self.label_outputPort.open('/' + self.module_name + '/label:o')
 
-        # Image anf face
+        # Image and face
         self.width_img = rf.check('width', yarp.Value(320),
                                   'Width of the input image').asInt()
 
@@ -168,32 +174,42 @@ class PersonsRecognition(yarp.RFModule):
         self.input_img_array = np.zeros((self.height_img, self.width_img, 3), dtype=np.uint8).tobytes()
 
         self.opc_port.open('/' + self.module_name + '/OPC:rpc')
-        # Modele for  face embeddings
-        self.trans = transforms.Compose([
-            np.float32,
-            transforms.ToTensor(),
-            fixed_image_standardization,
-            transforms.Resize((180, 180))
-        ])
-        try:
-            self.modele_face = torch.load(
-                "/home/icub/PycharmProjects/SpeakerRecognitionYarp/project/faceRecognition/saved_model/model_triple_facerecogntion_66%.pt")
-            self.db_embeddings_face = SpeakerEmbeddings(os.path.join(self.dataset_path, "face"))
-        except FileNotFoundError:
-            info(f"Unable to find dataset {SpeakerEmbeddings(os.path.join(self.dataset_path, 'face'))}")
-
-        self.modele_face.eval()
-        # self.db_embeddings_face.create_embeddings(self.modele_face)
-
-        self.model_av = torch.load(
-            "/home/icub/PycharmProjects/SpeakerRecognitionYarp/project/AVRecognition/model_audiovisual.pt")
-        self.model_av.eval()
         self.threshold_multimodal = 0.8
 
         info("Initialization complete")
+        return success
 
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        print('Running on device: {}'.format(self.device))
+    def load_model_audio(self):
+        self.resample_trans = torchaudio.transforms.Resample(self.sampling_rate, 16000)
+
+        # Load Database  for audio embeddings
+        try:
+            self.db_embeddings_audio = SpeakerEmbeddings(os.path.join(self.dataset_path, "audio"))
+            self.model_audio = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
+        except FileNotFoundError:
+            info(f"Unable to find dataset {SpeakerEmbeddings(os.path.join(self.dataset_path, 'audio'))}")
+            return False
+        return True
+
+    def load_model_face(self):
+        try:
+            self.modele_face = torch.load(self.face_model_path)
+            self.modele_face.eval()
+
+            self.db_embeddings_face = SpeakerEmbeddings(os.path.join(self.dataset_path, "face"))
+
+            # Transform for  face embeddings
+            self.trans = transforms.Compose([
+                np.float32,
+                transforms.ToTensor(),
+                fixed_image_standardization,
+                transforms.Resize((180, 180))
+            ])
+
+        except FileNotFoundError:
+            info(f"Unable to find dataset   {SpeakerEmbeddings(os.path.join(self.dataset_path, 'face'))} \
+            or model {self.face_model_path}")
+            return False
 
         return True
 
@@ -201,7 +217,7 @@ class PersonsRecognition(yarp.RFModule):
         print("[INFO] Stopping the module")
         self.audio_in_port.interrupt()
         self.label_outputPort.interrupt()
-        self.audio_power_port.interrupt()
+        self.eventPort.interrupt()
         self.handle_port.interrupt()
         self.image_in_port.interrupt()
         self.face_coord_port.interrupt()
@@ -213,7 +229,7 @@ class PersonsRecognition(yarp.RFModule):
         self.handle_port.close()
         self.label_outputPort.close()
         self.image_in_port.close()
-        self.audio_power_port.close()
+        self.eventPort.close()
         self.face_coord_port.close()
 
         return True
@@ -289,7 +305,8 @@ class PersonsRecognition(yarp.RFModule):
 
     def record_audio(self):
         self.sound = self.audio_in_port.read(False)
-        if self.sound:
+
+        if self.sound and self.is_voice:
 
             chunk = np.zeros((self.sound.getChannels(), self.sound.getSamples()), dtype=np.float32)
             self.nb_samples_received += self.sound.getSamples()
@@ -314,16 +331,19 @@ class PersonsRecognition(yarp.RFModule):
 
         return False
 
-    def get_power(self):
-        max_power = -1
-        if self.audio_power_port.getInputCount():
-            power_matrix = self.audio_power_port.read(False)
-            if power_matrix:
-
-                power_matrix = power_matrix.get(2).asList()
-                power_values = [power_matrix.get(0).asDouble(), power_matrix.get(1).asDouble()]
-                max_power = np.max(power_values)
-        return max_power
+    def check_voice(self):
+        if self.eventPort.getInputCount():
+            event_name = self.eventPort.read(False)
+            if event_name:
+                event_name = event_name.get(0).asString()
+                if event_name == "start_voice":
+                    self.is_voice = True
+                elif event_name == "stop_voice":
+                    self.audio = []
+                    self.nb_samples_received = 0
+                    self.is_voice = False
+                else:
+                    pass
 
     def get_face_coordinate(self):
         if self.face_coord_port.getInputCount():
@@ -333,8 +353,33 @@ class PersonsRecognition(yarp.RFModule):
         self.coord_face = None
         return False
 
+    def set_name_memory(self, face_id, face_name):
+        if self.opc_port.getOutputCount():
+            reply = yarp.Bottle()
+            cmd = yarp.Bottle("ask")
+            list_condition = cmd.addList()
+            cond1 = list_condition.addList()
+            cond1.addString("id_tracker")
+            cond1.addString("==")
+            cond1.addString(face_id)
+
+            self.opc_port.write(cmd, reply)
+            list_id = reply.get(1).asList().get(1).asList()
+            reply2 = yarp.Bottle()
+
+            cmd_str = "set ((id " + str(list_id.get(0).asInt()) + ") (label_tracker " + face_name + "))"
+            cmd = yarp.Bottle(cmd_str)
+            self.opc_port.write(cmd, reply2)
+
+            print(reply.toString())
+
+            return "ack" + reply.get(0).asString()
+
+        return False
+
     def get_name_in_memory(self):
         if self.opc_port.getOutputCount():
+
             reply = yarp.Bottle()
             cmd = yarp.Bottle("ask")
             list_condition = cmd.addList()
@@ -354,17 +399,20 @@ class PersonsRecognition(yarp.RFModule):
                 name = reply_id.get(1).asList().get(0).asList().get(1).asString()
                 self.db_embeddings_face.excluded_faces.append(name)
 
+
     def updateModule(self):
         current_face_emb = []
+        current_id_faces = []
 
+        self.check_voice()
         self.read_image()
-        audio_power = self.get_power()
         self.record_audio()
         self.get_name_in_memory()
         self.get_face_coordinate()
+
         if self.process:
 
-            if audio_power > self.threshold_power and self.nb_samples_received >= self.length_input * self.sound.getFrequency():
+            if self.nb_samples_received >= self.length_input * self.sound.getFrequency():
                     audio_signal = self.format_signal(self.audio)
                     self.speaker_emb = self.get_audio_embeddings(audio_signal)
                     self.audio = []
@@ -372,8 +420,7 @@ class PersonsRecognition(yarp.RFModule):
 
             if self.coord_face:
                 try:
-                    self.coord_face = format_face_coord(self.coord_face)
-                    self.coord_face = get_center_face(self.coord_face, self.width_img)
+                    current_id_faces, self.coord_face = format_face_coord(self.coord_face)
                     face_img = [face_alignement(f, self.frame) for f in self.coord_face]
                     current_face_emb = self.get_face_embeddings(face_img)
 
@@ -400,16 +447,13 @@ class PersonsRecognition(yarp.RFModule):
 
             elif len(current_face_emb):
                 faces_name, scores = self.predict_face(current_face_emb)
-                print(f"Recognized faces {faces_name}")
-                for name, score in zip(faces_name, scores):
-                    self.write_label(name, score, 0)
+                for face_id, name, score in zip(current_id_faces, faces_name, scores):
+                    self.set_name_memory(face_id, name)
+                    print("Predicted for face_id {} : {} with score {}".format(face_id, name, score))
 
-        elif self.face_coord_request is not None:
-            face_img = [face_alignement(self.face_coord_request, self.frame)]
-            face_emb = self.get_face_embeddings(face_img)
-            faces_name, scores = self.predict_face(face_emb)
-            self.write_label(faces_name[0], scores[0], 1)
-            self.face_coord_request = None
+            else:
+                pass
+
 
         return True
 
