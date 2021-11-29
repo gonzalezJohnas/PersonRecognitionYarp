@@ -7,7 +7,7 @@ import torch, torchaudio
 import yarp
 import numpy as np
 from speechbrain.pretrained import EncoderClassifier
-from project.voiceRecognition.speaker_embeddings import SpeakerEmbeddings
+from project.voiceRecognition.speaker_embeddings import EmbeddingsHandler
 from project.faceRecognition.utils import format_face_coord, face_alignement, format_names_to_bottle, \
     fixed_image_standardization, get_center_face
 from project.AVRecognition.lit_AVperson_classifier import LitSpeakerClassifier, Backbone
@@ -100,12 +100,11 @@ class PersonsRecognition(yarp.RFModule):
 
     def configure(self, rf):
 
-        success = False
+        success = True
 
         # handle port for the RFModule
         self.handle_port = yarp.Port()
         self.attach(self.handle_port)
-        self.handle_port.open('/' + self.module_name)
 
         # Define vars to receive audio
         self.audio_in_port = yarp.BufferedPortSound()
@@ -117,6 +116,7 @@ class PersonsRecognition(yarp.RFModule):
         self.module_name = rf.check("name",
                                     yarp.Value("PersonRecognition"),
                                     "module name (string)").asString()
+        self.handle_port.open('/' + self.module_name)
 
         self.dataset_path = rf.check("dataset_path",
                                      yarp.Value(
@@ -137,9 +137,9 @@ class PersonsRecognition(yarp.RFModule):
                                        yarp.Value(0.55),
                                        "threshold_face for detection (double)").asDouble()
 
-        self.face_model_path =  rf.check("face_model_path",
+        self.face_model_path = rf.check("face_model_path",
                                        yarp.Value(""),
-                                       "Path of the model for face embeddings (string)").asDouble()
+                                       "Path of the model for face embeddings (string)").asString()
 
         # Set the device for inference for the models
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -184,10 +184,10 @@ class PersonsRecognition(yarp.RFModule):
 
         # Load Database  for audio embeddings
         try:
-            self.db_embeddings_audio = SpeakerEmbeddings(os.path.join(self.dataset_path, "audio"))
+            self.db_embeddings_audio = EmbeddingsHandler(os.path.join(self.dataset_path, "audio"), n_neighbors=4)
             self.model_audio = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
         except FileNotFoundError:
-            info(f"Unable to find dataset {SpeakerEmbeddings(os.path.join(self.dataset_path, 'audio'))}")
+            info(f"Unable to find dataset {EmbeddingsHandler(os.path.join(self.dataset_path, 'audio'))}")
             return False
         return True
 
@@ -196,7 +196,7 @@ class PersonsRecognition(yarp.RFModule):
             self.modele_face = torch.load(self.face_model_path)
             self.modele_face.eval()
 
-            self.db_embeddings_face = SpeakerEmbeddings(os.path.join(self.dataset_path, "face"))
+            self.db_embeddings_face = EmbeddingsHandler(os.path.join(self.dataset_path, "face"), threshold=self.threshold_face)
 
             # Transform for  face embeddings
             self.trans = transforms.Compose([
@@ -207,7 +207,7 @@ class PersonsRecognition(yarp.RFModule):
             ])
 
         except FileNotFoundError:
-            info(f"Unable to find dataset   {SpeakerEmbeddings(os.path.join(self.dataset_path, 'face'))} \
+            info(f"Unable to find dataset   {EmbeddingsHandler(os.path.join(self.dataset_path, 'face'))} \
             or model {self.face_model_path}")
             return False
 
@@ -269,18 +269,32 @@ class PersonsRecognition(yarp.RFModule):
             reply.addString("ok")
 
         elif command.get(0).asString() == "reset":
-            self.db_embeddings_face.excluded_faces = []
+            self.db_embeddings_face.excluded_entities = []
 
         elif command.get(0).asString() == "set":
             if command.get(1).asString() == "thr":
-                self.threshold_audio = command.get(2).asDouble()
-                reply.addString("ok")
+                if command.get(2).asString() == "audio":
+                    self.threshold_audio = command.get(3).asDouble()
+                    self.db_embeddings_audio.threshold = self.threshold_audio
+
+                    reply.addString("ok")
+                elif command.get(2).asString() == "face":
+                    self.threshold_face = command.get(3).asDouble() if command.get(3).asDouble() > 0 else self.threshold_face
+                    self.db_embeddings_face.threshold = self.threshold_face
+                    reply.addString("ok")
+                else:
+                    reply.addString("nack")
             else:
                 reply.addString("nack")
 
         elif command.get(0).asString() == "get":
             if command.get(1).asString() == "thr":
-                reply.addDouble(self.threshold_audio)
+                if command.get(2).asString() == "audio":
+                    reply.addDouble(self.threshold_audio)
+                elif command.get(2).asString() == "face":
+                    reply.addDouble(self.threshold_face)
+                else:
+                    reply.addString("nack")
             elif command.get(1).asString() == "face":
                 self.face_coord_request = [command.get(2).asDouble(), command.get(3).asDouble(), command.get(4).asDouble(),
                                  command.get(5).asDouble()]
@@ -397,53 +411,65 @@ class PersonsRecognition(yarp.RFModule):
                 cmd = yarp.Bottle(cmd_str)
                 self.opc_port.write(cmd, reply_id)
                 name = reply_id.get(1).asList().get(0).asList().get(1).asString()
-                self.db_embeddings_face.excluded_faces.append(name)
+                self.db_embeddings_face.excluded_entities.append(name)
+                self.db_embeddings_audio.excluded_entities.append(name)
 
 
     def updateModule(self):
         current_face_emb = []
         current_id_faces = []
+        speaker_name, audio_score = "unknown", 0
 
         self.check_voice()
-        self.read_image()
-        self.record_audio()
+        record_image = self.read_image()
+        record_audio = self.record_audio()
         self.get_name_in_memory()
         self.get_face_coordinate()
 
         if self.process:
 
-            if self.nb_samples_received >= self.length_input * self.sound.getFrequency():
+            if record_audio and self.nb_samples_received >= self.length_input * self.sound.getFrequency():
                     audio_signal = self.format_signal(self.audio)
                     self.speaker_emb = self.get_audio_embeddings(audio_signal)
                     self.audio = []
                     self.nb_samples_received = 0
+                    speaker_name, audio_score = self.predict_speaker(self.speaker_emb)
 
-            if self.coord_face:
+            if record_image and self.frame.size != 0 and self.coord_face:
                 try:
                     current_id_faces, self.coord_face = format_face_coord(self.coord_face)
                     face_img = [face_alignement(f, self.frame) for f in self.coord_face]
                     current_face_emb = self.get_face_embeddings(face_img)
 
-                    self.faces_img = self.faces_img + face_img
-                    self.face_emb.append(current_face_emb[0].numpy())
+                    # self.faces_img = self.faces_img + face_img
+                    # self.face_emb.append(current_face_emb[0].numpy())
 
                 except Exception as e:
                     info("Exception while computing face embeddings" + str(e))
 
-            # if len(self.speaker_emb) and len(self.face_emb):
-            #     person_name, score = self.predict_multimodal(self.speaker_emb, self.face_emb)
-            #     if score > self.threshold_multimodal:
-            #         print(f"Recognized person with AV model {person_name}")
-            #         self.speaker_emb = []
-            #         self.face_emb = []
-            #         self.write_label(person_name, score, 2)
-            #         self.process = False
+            if speaker_name != 'unknown' and len(current_face_emb):
+                info("Got Audio and Face embeddings")
+                faces_name, face_scores = self.predict_face(current_face_emb)
 
-            if len(self.speaker_emb):
-                speaker_name, score = self.predict_speaker(self.speaker_emb)
-                print(f"Recognized speaker {speaker_name}")
-                self.speaker_emb = []
-                self.write_label(speaker_name, score, 1)
+                unknown_faces = []
+                distances = []
+                for face_id, emb, name, score in zip(current_id_faces, current_face_emb, faces_name, face_scores):
+                    if name != "unknown":
+                        self.set_name_memory(face_id, name)
+                        print("Predicted for face_id {} : {} with score {}".format(face_id, name, score))
+                    else:
+                        distances.append(self.db_embeddings_face.get_distance_from_user(emb, speaker_name))
+                        unknown_faces.append(face_id)
+
+                if len(unknown_faces):
+                    min_distance_index = np.argmax(distances)
+                    min_face_id = unknown_faces.pop(min_distance_index)
+                    self.set_name_memory(min_face_id, speaker_name)
+
+                    for face_id in unknown_faces:
+                        self.set_name_memory(face_id, "unknown")
+
+
 
             elif len(current_face_emb):
                 faces_name, scores = self.predict_face(current_face_emb)
@@ -466,6 +492,7 @@ class PersonsRecognition(yarp.RFModule):
         np_audio = np.concatenate(audio_list_samples, axis=1)
         np_audio = np.squeeze(np_audio)
         signal = np.transpose(np_audio, (1, 0))
+        signal = signal.mean(axis=1)
 
         return signal
 
@@ -477,6 +504,8 @@ class PersonsRecognition(yarp.RFModule):
         """
         resample_audio = self.resample_trans(torch.from_numpy(audio.transpose()))
         embedding = self.model_audio.encode_batch(resample_audio)
+        embedding = embedding.squeeze(axis=0)
+
 
         return embedding
 
@@ -502,9 +531,10 @@ class PersonsRecognition(yarp.RFModule):
 
         score, speaker_name = self.db_embeddings_audio.get_speaker_db_scan(embedding)
 
-        # print(f"Cosine distance for audio embeddings {score}")
         if score == -1:
             speaker_name = "unknown"
+
+        self.db_embeddings_audio.excluded_entities = []
 
         return speaker_name, float(score)
 
@@ -518,7 +548,7 @@ class PersonsRecognition(yarp.RFModule):
 
             predicted_faces.append(face_name)
             score_faces.append(score)
-        self.db_embeddings_face.excluded_faces = []
+        self.db_embeddings_face.excluded_entities = []
         return predicted_faces, score_faces
 
     def predict_multimodal(self, audio_emb, face_emb):
