@@ -98,6 +98,10 @@ class PersonsRecognition(yarp.RFModule):
 
         self.device = None
 
+        self.save_face = False
+        self.name = ""
+        self.predict = False
+
     def configure(self, rf):
 
         success = True
@@ -110,7 +114,6 @@ class PersonsRecognition(yarp.RFModule):
         self.audio_in_port = yarp.BufferedPortSound()
         self.label_outputPort = yarp.Port()
         self.eventPort = yarp.BufferedPortBottle()
-
 
         # Module parameters
         self.module_name = rf.check("name",
@@ -138,8 +141,8 @@ class PersonsRecognition(yarp.RFModule):
                                        "threshold_face for detection (double)").asDouble()
 
         self.face_model_path = rf.check("face_model_path",
-                                       yarp.Value(""),
-                                       "Path of the model for face embeddings (string)").asString()
+                                        yarp.Value(""),
+                                        "Path of the model for face embeddings (string)").asString()
 
         # Set the device for inference for the models
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -250,21 +253,49 @@ class PersonsRecognition(yarp.RFModule):
             reply.addString("ok")
             self.process = True
 
+        elif command.get(0).asString() == "predict":
+            self.predict = True
+            reply.addString("ok")
+
         elif command.get(0).asString() == "stop":
             self.process = False
             reply.addString("ok")
 
+        elif command.get(0).asString() == "predict":
+            if command.get(1).asString() == "stop":
+                self.predict = False
+                reply.addString("ok")
+
+        elif command.get(0).asString() == "check":
+            if command.get(1).asString() == "tracker":
+                new_detection = []
+                new_detection.append(command.get(2).asList().get(0).asDouble())
+                new_detection.append(command.get(2).asList().get(1).asDouble())
+                new_detection.append(command.get(2).asList().get(2).asDouble())
+                new_detection.append(command.get(2).asList().get(3).asDouble())
+
+                name_to_assign, id_to_assign = self.check_existing_face(new_detection)
+                if name_to_assign:
+                    reply.addString(name_to_assign)
+                    reply.addString(id_to_assign)
+                else:
+                    reply.addString("nack")
+
         elif command.get(0).asString() == "save":
             if command.get(1).asString() == "face":
-                name = command.get(2).asString().lower()
-                if name in self.db_embeddings_face.data_dict.keys():
-                    self.db_embeddings_face.data_dict[name] = self.db_embeddings_face.data_dict[name] + self.face_emb
+                if command.get(2).asString() == "start":
+                    self.save_face = True
                 else:
-                    self.db_embeddings_face.data_dict[name] = self.face_emb
+                    name = command.get(2).asString().lower()
+                    if name in self.db_embeddings_face.data_dict.keys():
+                        self.db_embeddings_face.data_dict[name] = self.db_embeddings_face.data_dict[name] + self.face_emb
+                    else:
+                        self.db_embeddings_face.data_dict[name] = self.face_emb
 
-                self.database.save_faces(self.faces_img, self.face_emb, name)
-                self.faces_img = []
-                self.face_emb = []
+                    self.database.save_faces(self.faces_img, self.face_emb, name)
+                    self.save_face = False
+                    self.faces_img = []
+                    self.face_emb = []
 
             reply.addString("ok")
 
@@ -297,13 +328,10 @@ class PersonsRecognition(yarp.RFModule):
                     reply.addString("nack")
             elif command.get(1).asString() == "face":
                 self.face_coord_request = [command.get(2).asDouble(), command.get(3).asDouble(), command.get(4).asDouble(),
-                                 command.get(5).asDouble()]
-
+                                           command.get(5).asDouble()]
                 reply.addString("ok")
-
             else:
                 reply.addString("nack")
-
         else:
             reply.addString("nack")
 
@@ -342,7 +370,6 @@ class PersonsRecognition(yarp.RFModule):
                 (self.height_img, self.width_img, 3)).copy()
 
             return True
-
         return False
 
     def check_voice(self):
@@ -379,16 +406,43 @@ class PersonsRecognition(yarp.RFModule):
 
             self.opc_port.write(cmd, reply)
             list_id = reply.get(1).asList().get(1).asList()
-            reply2 = yarp.Bottle()
 
-            cmd_str = "set ((id " + str(list_id.get(0).asInt()) + ") (label_tracker " + face_name + "))"
-            cmd = yarp.Bottle(cmd_str)
-            self.opc_port.write(cmd, reply2)
+            if list_id.size():
+                cmd = yarp.Bottle()
 
-            print(reply.toString())
+                cmd.addString("get")
+                list_all = cmd.addList()
+                list_1 = list_all.addList()
+                list_1.addString("id")
+                list_1.addInt(list_id.get(0).asInt())
 
-            return "ack" + reply.get(0).asString()
+                list_2 = list_all.addList()
+                list_2.addString("propSet")
+                list_3 = list_2.addList()
+                list_3.addString("verified")
 
+                reply_ver = yarp.Bottle()
+
+                self.opc_port.write(cmd, reply_ver)
+                print("Sent cmd to OPC {}, and received response {}".format(cmd.toString(), reply_ver.toString()))
+
+                verified = reply_ver.get(1).asList().get(0).asList().get(1).asInt()
+                if verified == 0:
+                    reply2 = yarp.Bottle()
+                    cmd = yarp.Bottle()
+                    cmd.addString("set")
+                    list_cmd = cmd.addList()
+                    id_cmd = list_cmd.addList()
+                    id_cmd.addString("id")
+                    id_cmd.addInt(list_id.get(0).asInt())
+                    label_cmd = list_cmd.addList()
+                    label_cmd.addString("label_tracker")
+                    label_cmd.addString(face_name.strip())
+                    # cmd_str = "set ((id " + str(list_id.get(0).asInt()) + ") (label_tracker" + face_name + "))"
+
+                    self.opc_port.write(cmd, reply2)
+                    print("Sent cmd to OPC {} and received reply {}".format(cmd.toString(), reply2.toString()))
+                    return "ack" + reply2.get(0).asString()
         return False
 
     def get_name_in_memory(self):
@@ -405,15 +459,53 @@ class PersonsRecognition(yarp.RFModule):
             self.opc_port.write(cmd, reply)
             list_id = reply.get(1).asList().get(1).asList()
 
-            reply_id = yarp.Bottle()
+
             for i in range(list_id.size()):
                 cmd_str = "get ((id " + str(list_id.get(i).asInt()) + ") (propSet (label_tracker)))"
                 cmd = yarp.Bottle(cmd_str)
+                reply_id = yarp.Bottle()
                 self.opc_port.write(cmd, reply_id)
-                name = reply_id.get(1).asList().get(0).asList().get(1).asString()
-                self.db_embeddings_face.excluded_entities.append(name)
-                self.db_embeddings_audio.excluded_entities.append(name)
+                if reply_id.size() > 0:
+                    name = reply_id.get(1).asList().get(0).asList().get(1).asString()
+                    self.db_embeddings_face.excluded_entities.append(name)
+                    self.db_embeddings_audio.excluded_entities.append(name)
 
+    def get_name_to_verify(self):
+
+        if self.opc_port.getOutputCount():
+
+            reply = yarp.Bottle()
+            cmd = yarp.Bottle("ask")
+            list_condition = cmd.addList()
+            cond1 = list_condition.addList()
+            cond1.addString("verified")
+            cond1.addString("==")
+            cond1.addInt(1)
+            list_condition.addString("&&")
+            cond2 = list_condition.addList()
+            cond2.addString("active")
+            cond2.addString("==")
+            cond2.addInt(0)
+
+            self.opc_port.write(cmd, reply)
+            list_id = reply.get(1).asList().get(1).asList()
+
+            name_to_verify = []
+            id_to_verify = []
+            if list_id.size() > 0:
+                reply_id = yarp.Bottle()
+                for i in range(list_id.size()):
+                    cmd_str = "get ((id " + str(list_id.get(i).asInt()) + ") (propSet (label_tracker id_tracker)))"
+                    cmd = yarp.Bottle(cmd_str)
+                    self.opc_port.write(cmd, reply_id)
+                    name = reply_id.get(1).asList().get(1).asList().get(1).asString()
+                    id = reply_id.get(1).asList().get(0).asList().get(1).asString()
+                    name_to_verify.append(name)
+                    id_to_verify.append(id)
+
+            return name_to_verify, id_to_verify
+
+        return False
 
     def updateModule(self):
         current_face_emb = []
@@ -423,13 +515,17 @@ class PersonsRecognition(yarp.RFModule):
         self.check_voice()
         record_image = self.read_image()
         record_audio = self.record_audio()
+
         self.get_name_in_memory()
         self.get_face_coordinate()
 
         if self.process:
 
             if record_audio and self.nb_samples_received >= self.length_input * self.sound.getFrequency():
+                    print("Computing Speaker Embedding")
                     audio_signal = self.format_signal(self.audio)
+                    # Compute speaker embeddings and do speaker prediction only if the audio database is updated with
+                    # the same people folders as the face embedding folders (make empty folders?)
                     self.speaker_emb = self.get_audio_embeddings(audio_signal)
                     self.audio = []
                     self.nb_samples_received = 0
@@ -441,47 +537,76 @@ class PersonsRecognition(yarp.RFModule):
                     face_img = [face_alignement(f, self.frame) for f in self.coord_face]
                     current_face_emb = self.get_face_embeddings(face_img)
 
-                    # self.faces_img = self.faces_img + face_img
-                    # self.face_emb.append(current_face_emb[0].numpy())
+                    if self.save_face and len(current_face_emb) > 0:
+
+                        self.faces_img = self.faces_img + face_img
+                        self.face_emb.append(current_face_emb[0].numpy())
 
                 except Exception as e:
                     info("Exception while computing face embeddings" + str(e))
 
-            if speaker_name != 'unknown' and len(current_face_emb):
-                info("Got Audio and Face embeddings")
-                faces_name, face_scores = self.predict_face(current_face_emb)
+            if self.predict:
+                if speaker_name != 'unknown' and len(current_face_emb):
+                    info("Got Audio and Face embeddings")
+                    faces_name, face_scores = self.predict_face(current_face_emb)
 
-                unknown_faces = []
-                distances = []
-                for face_id, emb, name, score in zip(current_id_faces, current_face_emb, faces_name, face_scores):
-                    if name != "unknown":
+                    unknown_faces = []
+                    distances = []
+                    for face_id, emb, name, score in zip(current_id_faces, current_face_emb, faces_name, face_scores):
+                        if name != "unknown":
+                            name = self.format_name(name)
+                            self.set_name_memory(face_id, name)
+                            print("Predicted for face_id {} : {} with score {}".format(face_id, name, score))
+                        else:
+                            distances.append(self.db_embeddings_face.get_distance_from_user(emb, speaker_name))
+                            unknown_faces.append(face_id)
+
+                    if len(unknown_faces):
+                        min_distance_index = np.argmax(distances)
+                        min_face_id = unknown_faces.pop(min_distance_index)
+                        self.set_name_memory(min_face_id, speaker_name)
+                        # print("Speaker name closest to unknown face is {} ".format(speaker_name))
+
+                        for face_id in unknown_faces:
+                            self.set_name_memory(face_id, "unknown")
+
+                elif len(current_face_emb):
+                    faces_name, scores = self.predict_face(current_face_emb)
+                    for face_id, name, score in zip(current_id_faces, faces_name, scores):
                         self.set_name_memory(face_id, name)
                         print("Predicted for face_id {} : {} with score {}".format(face_id, name, score))
-                    else:
-                        distances.append(self.db_embeddings_face.get_distance_from_user(emb, speaker_name))
-                        unknown_faces.append(face_id)
-
-                if len(unknown_faces):
-                    min_distance_index = np.argmax(distances)
-                    min_face_id = unknown_faces.pop(min_distance_index)
-                    self.set_name_memory(min_face_id, speaker_name)
-
-                    for face_id in unknown_faces:
-                        self.set_name_memory(face_id, "unknown")
-
-
-
-            elif len(current_face_emb):
-                faces_name, scores = self.predict_face(current_face_emb)
-                for face_id, name, score in zip(current_id_faces, faces_name, scores):
-                    self.set_name_memory(face_id, name)
-                    print("Predicted for face_id {} : {} with score {}".format(face_id, name, score))
-
-            else:
-                pass
-
-
+                else:
+                    pass
         return True
+
+    def check_existing_face(self, detection):
+        users_to_verify, id_to_verify = self.get_name_to_verify()
+        face_name = ""
+        face_id = ""
+        if len(users_to_verify) > 0:
+            face_img_list = []
+            face_img = face_alignement(detection, self.frame)
+            face_img_list.append(face_img)
+            current_face_emb = self.get_face_embeddings(face_img_list)
+
+            if len(current_face_emb):
+                distances = []
+                names = []
+                ids = []
+
+                current_face_emb = current_face_emb[0]
+                for (user, id) in zip(users_to_verify, id_to_verify):
+                    # if user exist in db_embedding folder
+                    distances.append(self.db_embeddings_face.get_distance_from_user(current_face_emb, user))
+                    names.append(user)
+                    ids.append(id)
+
+                # max similarity is min distance (cosine similarity output [-1,1]
+                min_distance_index = np.argmax(distances)
+                face_name = names[min_distance_index]
+                face_id = ids[min_distance_index]
+
+        return face_name, face_id
 
     def format_signal(self, audio_list_samples):
         """
@@ -505,7 +630,6 @@ class PersonsRecognition(yarp.RFModule):
         resample_audio = self.resample_trans(torch.from_numpy(audio.transpose()))
         embedding = self.model_audio.encode_batch(resample_audio)
         embedding = embedding.squeeze(axis=0)
-
 
         return embedding
 
@@ -535,6 +659,7 @@ class PersonsRecognition(yarp.RFModule):
             speaker_name = "unknown"
 
         self.db_embeddings_audio.excluded_entities = []
+        print("Predicted speaker name is {} with score {}".format(speaker_name, score))
 
         return speaker_name, float(score)
 
@@ -576,6 +701,10 @@ class PersonsRecognition(yarp.RFModule):
             name_bottle.addInt(mode)
 
             self.label_outputPort.write(name_bottle)
+
+    def format_name(self, name):
+        name.strip()
+        return name
 
 
 if __name__ == '__main__':

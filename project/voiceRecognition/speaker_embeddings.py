@@ -20,7 +20,6 @@ class EmbeddingsHandler:
         self.excluded_entities = []
         self.similarity_func = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
 
-
     def _load_dataset(self):
         """
         Load the set of embeddings define in the root_dir
@@ -37,22 +36,24 @@ class EmbeddingsHandler:
             self.data_dict[s] = list_emb
             self.name_dict[label_id] = s
 
-
     def get_distance_from_user(self, emb, identity_to_check):
         max_dist = -1
 
-        for person_emb in self.data_dict[identity_to_check]:
-            dist = self.similarity_func(torch.from_numpy(person_emb), emb).numpy()
-            if dist[0] > max_dist:
-                max_dist = dist[0]
+        if identity_to_check in self.data_dict.keys():
+            for person_emb in self.data_dict[identity_to_check]:
+                dist = self.similarity_func(torch.from_numpy(person_emb), emb).numpy()
+                if dist[0] > max_dist:
+                    max_dist = dist[0]
 
-        return max_dist
+            return max_dist
+        return False
 
     def get_max_distances(self, emb, thr=None):
         if thr is None:
             thr = self.threshold
         list_distance = []
         label_list = []
+        print("Data dictionary size {}".format(len(self.data_dict)))
         for speaker_label, list_emb in self.data_dict.items():
             if speaker_label not in self.excluded_entities:
                 for person_emb in list_emb:
@@ -62,7 +63,6 @@ class EmbeddingsHandler:
                         label_list.append(speaker_label)
 
         return list_distance, label_list
-
 
     def get_speaker_db_scan(self, emb, thr=None):
         distances, labels = self.get_max_distances(emb, thr)
@@ -95,9 +95,7 @@ class EmbeddingsHandler:
         except Exception as e:
             return -1, -1
 
-
     def get_speaker(self, emb):
-
         min_score = 0
         final_label = 0
         for speaker_label, mean_emb in self.mean_embedding.items():
@@ -117,10 +115,7 @@ class EmbeddingsHandler:
 
         return min_score, final_label
 
-
-
     def create_embeddings(self, encoder, trans):
-
         # Process train folder
         dirs = os.listdir(self.root_dir)
 
@@ -144,6 +139,7 @@ class EmbeddingsHandler:
                     embeddings = encoder(input_tensor).data.cpu().numpy()
                     enbeddings_path = os.path.join(self.root_dir, people_dir) + f"/{img_name}_emb.npy"
                     np.save(enbeddings_path, embeddings.ravel())
+
 
 if __name__ == '__main__':
     OUTPUT_EMB_TRAIN = "/home/icub/PycharmProjects/SpeakerRecognitionYarp/data/dataset_emb/train"
